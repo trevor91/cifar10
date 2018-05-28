@@ -1,39 +1,37 @@
 import torch
-# import torch.nn as nn
+import torch.nn as nn
 from model1 import model1
+from model2 import model2
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
+import os
 
 def setting():
-	global CLASSES, device, train_loader, test_loader, trans
-	CLASSES = ["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
-	torch.manual_seed(2018)
-	usd_cuda = torch.cuda.is_available()
-	device = torch.device('cuda')
-	kwargs = {'num_workers':4, 'pin_memory':True}
-	trans = transforms.Compose([
-	    #transforms.Scale(32), # 32by32
-	    transforms.ToTensor(),
-	    transforms.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5))
-	])
-	# train_loader = torch.utils.data.DataLoader(
-	#     datasets.CIFAR10('./data', train = True, download = True,
-	#                 transform = trans),
-	#     batch_size = 256,
-	#     shuffle=True,
-	#     **kwargs)
-	image_data = datasets.ImageFolder('./data/train/', transform=trans)
-	train_loader = torch.utils.data.DataLoader(image_data,
-	                                            batch_size=256,
-	                                            shuffle = True,
-	                                           num_workers = 8)
-	test_loader = torch.utils.data.DataLoader(
-	    datasets.CIFAR10('./data', train = False, download = False,
-	                transform = trans),
-	    batch_size = 256,
-	    shuffle=True,
-	    **kwargs)
+    global CLASSES, device, train_loader, test_loader, trans, kwargs, batch_size
+    # CLASSES = ["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
+    torch.manual_seed(2018)
+    usd_cuda = torch.cuda.is_available()
+    device = torch.device('cuda')
+    kwargs = {'num_workers':4, 'pin_memory':True}
+    batch_size = 4096
+    trans = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5))
+    ])
+
+    image_data = datasets.ImageFolder('./data/train/', transform=trans)
+    CLASSES = image_data.classes
+    train_loader = torch.utils.data.DataLoader(image_data,
+                                                batch_size=batch_size,
+                                                shuffle = True,
+                                               **kwargs)
+    test_loader = torch.utils.data.DataLoader(
+        datasets.CIFAR10('./data', train = False, download = True,
+                    transform = trans),
+        batch_size = batch_size,
+        shuffle=True,
+        **kwargs)
 
 def train(epoch):
     model.train()
@@ -44,8 +42,9 @@ def train(epoch):
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
-        if batch_idx % 2560 == 0:
+        if batch_idx % 4 == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'. format(
+                epoch, batch_idx * len(data), len(train_loader.dataset),
                 100.*batch_idx / len(train_loader), loss.item()))
 
 def test():
@@ -65,30 +64,57 @@ def test():
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
 
-def kaggle():
-	global kaggle_loader
-	image_data = datasets.ImageFolder('./data/test/', transform=trans)
-	kaggle_loader = torch.utils.data.DataLoader(image_data,
-	                                            batch_size=256,
-	                                            shuffle = False,
-	                                           num_workers = 8)
+
+def kaggle_data():
+    global kaggle_loader
+    image_data = datasets.ImageFolder('./data/test/', transform=trans)
+    kaggle_loader = torch.utils.data.DataLoader(image_data,
+                                                batch_size=batch_size,
+                                                shuffle = False,
+                                               **kwargs)
+
+
 if __name__ == '__main__':
-	setting()
-	# model = model1().to(device)
-	model = torch.load("main1.pt").to(device)
-	optimizer = optim.Adam(model.parameters(), lr=0.001)
+    setting()
+    model = model2()
+    if torch.cuda.device_count() > 1:
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = nn.DataParallel(model)
+    model.to(device)
 
-	kaggle()
-	for i, (data, target) in enumerate(kaggle_loader):
-		data = data.to(device)
-		output = model(data)
-		pred = output.max(1, keepdim = True)[1]
-		for i, p in enumerate(pred):
-			print(i+1, CLASSES[int(p)])
-		break
+    save_model_path = './model/'
+    learning_rate = 0.001
+    save_model_name = 'model2_' + str(learning_rate) + '.pt'
+    
+    if save_model_name in os.listdir(save_model_path):
+        print("make kaggle csv file")
+        model = torch.load(save_model_path+save_model_name).to(device)
+        kaggle_data()
 
-	# for epoch in range(1,31):
-	#     train(epoch)
-	#     test()
-	# else:
-	#     torch.save(model, 'main1.pt')
+        import csv
+        csv_name = save_model_name[:-3] + '.csv'
+        f = open('./rst/'+csv_name, 'w', newline = '')
+        wr = csv.writer(f)
+        wr.writerow(["id", "label"])
+
+        cnt = 0
+        for i, (data, target) in enumerate(kaggle_loader):
+            data = data.to(device)
+            output = model(data)
+            pred = output.max(1, keepdim = True)[1]
+            print(output)
+            for i, p in enumerate(pred):
+                wr.writerow([i+1 + (batch_size*cnt), CLASSES[int(p)]])
+            cnt += 1
+        f.close()
+    else:
+        print("model training & save")
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        for epoch in range(1,251):
+            train(epoch)
+            if epoch % 5 == 0:
+                test()
+            if epoch % 100 == 0:
+                torch.save(model, save_model_path+"epoch"+str(epoch)+save_model_name)
+        else:
+            torch.save(model, save_model_path+save_model_name)
