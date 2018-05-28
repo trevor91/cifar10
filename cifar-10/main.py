@@ -67,11 +67,14 @@ def test():
 
 def kaggle_data():
     global kaggle_loader
-    image_data = datasets.ImageFolder('./data/test/', transform=trans)
+    class MyImageFolder(datasets.ImageFolder):
+        def __getitem__(self, index):
+            return super(MyImageFolder, self).__getitem__(index), self.imgs[index]
+    image_data = MyImageFolder('./data/test/', transform=trans)
     kaggle_loader = torch.utils.data.DataLoader(image_data,
                                                 batch_size=batch_size,
                                                 shuffle = False,
-                                               **kwargs)
+                                                ) # if setting num_worker -> error...fxxx...
 
 
 if __name__ == '__main__':
@@ -96,15 +99,17 @@ if __name__ == '__main__':
         f = open('./rst/'+csv_name, 'w', newline = '')
         wr = csv.writer(f)
         wr.writerow(["id", "label"])
-
         cnt = 0
-        for i, (data, target) in enumerate(kaggle_loader):
+        for i, data in enumerate(kaggle_loader):
+            if i % 1000 == 0:
+                print(i)
+            (data,_), (path,_) = data
             data = data.to(device)
+            path = path[0][17:-4]
             output = model(data)
             pred = output.max(1, keepdim = True)[1]
-            print(output)
             for i, p in enumerate(pred):
-                wr.writerow([i+1 + (batch_size*cnt), CLASSES[int(p)]])
+                wr.writerow([path, CLASSES[int(p)]])
             cnt += 1
         f.close()
     else:
