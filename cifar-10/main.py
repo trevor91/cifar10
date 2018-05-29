@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-from model1 import model1
-from model2 import model2
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
@@ -13,7 +11,7 @@ def setting():
     torch.manual_seed(2018)
     usd_cuda = torch.cuda.is_available()
     device = torch.device('cuda')
-    kwargs = {'num_workers':4, 'pin_memory':True}
+    kwargs = {'num_workers':8, 'pin_memory':True}
     batch_size = 4096
     trans = transforms.Compose([
         transforms.ToTensor(),
@@ -35,11 +33,12 @@ def setting():
 
 def train(epoch):
     model.train()
+    criterion = nn.CrossEntropyLoss()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % 4 == 0:
@@ -51,11 +50,12 @@ def test():
     model.eval()
     test_loss = 0
     correct = 0
+    criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(output, target, size_average=False).item()
+            test_loss += criterion(output, target)
             pred = output.max(1, keepdim = True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
 
@@ -72,14 +72,19 @@ def kaggle_data():
             return super(MyImageFolder, self).__getitem__(index), self.imgs[index]
     image_data = MyImageFolder('./data/test/', transform=trans)
     kaggle_loader = torch.utils.data.DataLoader(image_data,
-                                                batch_size=batch_size,
+                                                batch_size=1,
                                                 shuffle = False,
                                                 ) # if setting num_worker -> error...fxxx...
 
 
 if __name__ == '__main__':
     setting()
-    model = model2()
+
+    # from model1 import model1
+    # from model2 import model2
+    from vgg16 import VGG
+
+    model = VGG("VGG16")
     if torch.cuda.device_count() > 1:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
@@ -87,7 +92,7 @@ if __name__ == '__main__':
 
     save_model_path = './model/'
     learning_rate = 0.001
-    save_model_name = 'model2_' + str(learning_rate) + '.pt'
+    save_model_name = 'vgg16' + str(learning_rate) + '.pt'
     
     if save_model_name in os.listdir(save_model_path):
         print("make kaggle csv file")
